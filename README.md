@@ -1,258 +1,390 @@
 # LangGraph Helper Agent
 
-A compact helper agent that demonstrates two main capabilities:
+An AI assistant that helps developers work with LangGraph and LangChain by answering practical questions. The agent supports both offline and online modes to handle different usage scenarios, such as working without internet access or integrating with live documentation sources.
 
-- Offline documentation retrieval (local `.txt` resources under `data/`).
-- Online LLM-backed responses (via the Google Gemini client wrapper in
-  `agent/utils.py`).
+## 🎯 Core Features
 
-This README documents the complete codebase: CLI, agent package, retrieval
-implementation, LLM wiring, helper scripts, and environment expectations.
+- **Dual Operating Modes**: Offline (local documentation) and Online (web search + LLM)
+- **Smart Retrieval**: TF-IDF based document search for offline mode
+- **LLM-Powered**: Uses Google Gemini for intelligent responses
+- **Portable**: Easy setup with clear dependencies and environment configuration
 
-## Repository layout (important files)
+---
 
-- `main.py` — CLI entrypoint. Usage: `python .\main.py --mode <online|offline> "<query>"`.
-- `agent/__init__.py` — public exports: `answer_offline`, `answer_online`.
-- `agent/offline_mode.py` — helper functions for reading `data/` and
-  a very small `answer_offline(query: str) -> str` fallback.
-- `agent/retrieval.py` — `OfflineRetriever` class showing TF-IDF +
-  `cosine_similarity` based search.
-- `agent/online_mode.py` — thin wrapper that calls `agent.utils.call_gemini`.
-- `agent/utils.py` — loads `.env`, configures `google.generativeai`, and
-  defines `call_gemini(prompt: str) -> str`.
-- `data/` — directory containing `.txt` documents used by offline mode.
-- `scripts/download_docs.py` — downloads example `.txt` docs into
-  `data/` (contains canonical source URLs used by the project).
-- `.env.example` — shows required environment variables (`GEMINI_API_KEY`).
-- `requirements.txt` — runtime dependencies (`python-dotenv`, `requests`,
-  `scikit-learn`, `numpy`, `scipy`).
+## 📁 Repository Structure
+```
+langgraph-helper-agent/
+├── agent/
+│   ├── __init__.py          # Public exports
+│   ├── offline_mode.py      # Offline mode implementation
+│   ├── online_mode.py       # Online mode implementation
+│   ├── retrieval.py         # TF-IDF document retriever
+│   └── utils.py             # Gemini API configuration
+├── data/                     # Offline documentation (.txt files)
+├── scripts/
+│   └── download_docs.py     # Download latest documentation
+├── tests/
+│   ├── __init__.py
+│   └── test_offline.py      # Unit tests
+├── .env                      # Your secrets (NOT committed)
+├── .env.example             # Environment template (committed)
+├── .gitignore               # Git ignore rules
+├── main.py                  # CLI entrypoint
+├── README.md                # This file
+└── requirements.txt         # Python dependencies
+```
 
-## High-level architecture and data flow
+---
 
-1. User runs CLI (`main.py`) with `--mode` and a query.
-2. If `offline`, the CLI calls `answer_offline(query)` which uses either
-   `offline_mode.load_offline_docs()` (simple concatenation + substring
-   search) or can be replaced with `OfflineRetriever` from
-   `agent/retrieval.py` for TF-IDF ranking (reads from `data/`).
-3. If `online`, the CLI calls `answer_online(query)` which delegates to
-   `agent.utils.call_gemini(prompt)` to call the Gemini API and return text.
+## 🏗️ Architecture Overview
 
-This separation keeps retrieval and LLM code separate and easy to replace.
+### High-Level Flow
+```
+User Query
+    ↓
+main.py (CLI)
+    ↓
+Mode Selection (--mode flag or AGENT_MODE env var)
+    ↓
+┌─────────────────┐         ┌─────────────────┐
+│  Offline Mode   │         │   Online Mode   │
+├─────────────────┤         ├─────────────────┤
+│ 1. Load docs    │         │ 1. Web search   │
+│    from data/   │         │    (Tavily API) │
+│ 2. Search docs  │         │ 2. Combine with │
+│    (substring   │         │    Gemini       │
+│    or TF-IDF)   │         │ 3. Generate     │
+│ 3. Pass to      │         │    answer       │
+│    Gemini       │         │                 │
+│ 4. Return       │         │                 │
+└─────────────────┘         └─────────────────┘
+         ↓                           ↓
+    User receives answer
+```
 
-## Online Mode (Required)
+### Component Details
 
-The online mode enables the agent to fetch up-to-date information from the web.
-This project uses only free-tier or free-to-use services.
+#### **main.py**
+- CLI argument parsing
+- Mode selection logic
+- Delegates to `answer_offline()` or `answer_online()`
 
-Search Provider
-- DuckDuckGo Instant Answer API (`https://api.duckduckgo.com/?q=<query>&format=json`) — free, no API key required.
+#### **agent/offline_mode.py**
+- Loads all `.txt` files from `data/` directory
+- Truncates to 30,000 characters to avoid token limits
+- Passes documentation + query to Gemini
+- Returns answer based solely on local docs
 
-How online mode works
-1. The agent sends the user query to DuckDuckGo Search (Instant Answer API).
-2. The search JSON results are parsed and cleaned (abstract, related topics, and result snippets).
-3. Relevant text snippets are combined into a contextual prompt for the LLM.
-4. The prompt is passed to Gemini for synthesis (see `agent/utils.py`).
-5. The final answer merges online findings with LLM reasoning and is returned to the user.
+#### **agent/online_mode.py**
+- Uses Tavily API for web search (optional)
+- Searches for: "LangGraph Python LangChain Python: {query}"
+- Combines search results with Gemini's knowledge
+- Returns comprehensive answer with web context
 
-Why DuckDuckGo
-- 100% free
-- No authentication required
-- No API key or usage limits for basic search
-- Suitable for developer documentation lookups and portable across machines
+#### **agent/retrieval.py**
+- `OfflineRetriever` class using TF-IDF + cosine similarity
+- Loads and indexes all `.txt` files
+- Provides `search(query, top_k)` for ranked retrieval
+- Can be used instead of simple substring search
 
-Note: Users must only provide a Gemini API key via `.env`. No additional API keys are required for online mode.
+#### **agent/utils.py**
+- Centralized Gemini API configuration
+- `call_gemini(prompt)` function used by both modes
+- Handles API key validation
 
-## Offline Mode (Required)
+---
 
-The offline mode allows the agent to operate without internet access (except
-for the Gemini API, which is permitted by the assignment). It uses only the
-local `.txt` documentation files located under `data/`.
+## 🚀 Quick Start
 
-How offline mode works:
-1. The agent loads all `.txt` files from `data/`.
-2. The files represent the LangGraph and LangChain documentation in `llms.txt` format.
-3. A simple substring search or TF-IDF ranking (via `OfflineRetriever`) is applied.
-4. The retrieved text is returned directly to the user without using any online resources.
-5. If no match is found, a fallback message is returned.
-
-Data sources used in offline mode:
-- `https://langchain-ai.github.io/langgraph/llms.txt`
-- `https://langchain-ai.github.io/langgraph/llms-full.txt`
-- `https://python.langchain.com/llms.txt`
-
-Offline mode fully satisfies the assignment requirement for operating with
-pre-downloaded documentation and no internet access.
-
-## Detailed component notes
-
-agent/offline_mode.py
-- `DATA_DIR` is `data/` relative to the project root.
-- `load_offline_docs()` reads all `.txt` files and returns a single
-  concatenated string. It is used by `answer_offline(query)` which performs
-  a case-insensitive substring search. If any match exists, the full docs
-  text is returned with a header; otherwise a fallback message is returned.
-
-agent/retrieval.py
-- `OfflineRetriever(data_path: Path)` loads all `.txt` files, fits a
-  `TfidfVectorizer`, and exposes `search(query: str, top_k=3)` returning the
-  top-k matching document strings. Use this class when you need ranked
-  results instead of the substring fallback.
-
-agent/utils.py
-- Loads `.env` using `python-dotenv` and reads `GEMINI_API_KEY`.
-- Raises `ValueError` if `GEMINI_API_KEY` is not present — online mode
-  cannot function without it.
-- Configures `google.generativeai` and constructs a model with
-  `genai.GenerativeModel("gemini-1.5-flash")`, then calls
-  `model.generate_content(prompt)` and returns `response.text`.
-
-scripts/download_docs.py
-- Defines `URLS` mapping file names to remote `.txt` resources. Running
-  this script downloads each and writes into `data/`. It's the
-  canonical way to populate offline docs for testing.
-
-.env.example
-- Contains example keys and the `GEMINI_MODEL` placeholder. Replace with
-  your environment-secret values in a local `.env` file. Do NOT commit real
-  keys to source control.
-
-## Quick start (Windows PowerShell)
-
-1. Create and activate virtual environment, then install deps:
-
+### 1. Clone and Setup Environment
 ```powershell
+# Clone repository
+git clone https://github.com/tomerdolev/langgraph-helper-agent.git
+cd langgraph-helper-agent
+
+# Create virtual environment
 python -m venv venv
 .\venv\Scripts\Activate.ps1
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-2. (Optional) Populate offline docs for offline testing:
+### 2. Configure Environment Variables
+```powershell
+# Copy example to create your .env file
+copy .env.example .env
+```
 
+Edit `.env` and add your API key:
+```bash
+GEMINI_API_KEY=your_actual_key_here
+```
+
+**Get your Gemini API key:** https://aistudio.google.com/app/apikey
+
+### 3. Download Offline Documentation (Optional)
 ```powershell
 python .\scripts\download_docs.py
 ```
 
-This will download the latest `.txt` files into the `data/` directory.
+This downloads the latest documentation to `data/`:
+- `langchain_llms.txt`
+- `langgraph_llms.txt`
+- `langgraph_llms_full.txt`
 
-3. Run the CLI in offline mode:
+---
 
+## 💻 Usage Examples
+
+### Offline Mode
 ```powershell
-python .\main.py --mode offline "what llms are supported"
+python .\main.py --mode offline "How do I add persistence to a LangGraph agent?"
 ```
 
-4. Run the CLI in online mode (requires `.env` with `GEMINI_API_KEY`):
+**Example Output:**
+```
+Based on the offline documentation, to add persistence to a LangGraph agent:
 
+1. Use a Checkpointer: LangGraph provides checkpointers like MemorySaver 
+   for in-memory persistence or SqliteSaver for database persistence.
+
+2. Pass the checkpointer when compiling your graph:
+   
+   from langgraph.checkpoint.memory import MemorySaver
+   
+   checkpointer = MemorySaver()
+   app = graph.compile(checkpointer=checkpointer)
+
+3. Use thread_id when invoking to maintain conversation state:
+   
+   config = {"configurable": {"thread_id": "1"}}
+   app.invoke({"messages": [...]}, config)
+
+This allows your agent to remember previous interactions and resume from 
+where it left off.
+```
+
+### Online Mode
 ```powershell
-python .\main.py --mode online "summarize the project"
+python .\main.py --mode online "What are the latest LangGraph features?"
 ```
 
-You can also set the mode via environment variable and omit `--mode`:
+**Example Output:**
+```
+Based on current web search results and documentation:
 
+The latest LangGraph features include:
+
+1. Streaming Support: Real-time streaming of agent actions and thoughts
+2. Human-in-the-Loop: Built-in interrupts for human approval
+3. Long-term Memory: Store and retrieve information across sessions
+4. Multi-agent Systems: Coordinate multiple specialized agents
+5. LangGraph Studio: Visual debugging and prototyping tool
+
+These features make LangGraph ideal for building production-ready, 
+stateful AI agents.
+```
+
+### Using Environment Variable
 ```powershell
-$env:AGENT_MODE = "online"
-python .\main.py "summarize the project"
+# Set mode via environment variable
+$env:AGENT_MODE = "offline"
+python .\main.py "What's the difference between StateGraph and MessageGraph?"
 ```
 
-## Testing and quick checks
+---
 
-- Manual smoke tests: run the CLI with sample queries as above.
-- Suggested unit test to add (example): test that `OfflineRetriever.search`
-  returns expected number of items and that `offline_mode.load_offline_docs()`
-  loads files from `data/`.
+## 📖 Operating Modes Explained
 
-Example pytest (not included):
+### Offline Mode
 
-```python
-def test_retriever(tmp_path):
-    # create sample files in tmp_path
-    # instantiate OfflineRetriever(tmp_path) and assert search results
-    pass
+**How it works:**
+1. Loads all `.txt` files from `data/` directory
+2. Concatenates documentation (up to 30,000 characters)
+3. Sends query + documentation to Gemini
+4. Returns answer based **only** on local docs
+
+**Data sources:**
+- LangGraph: `https://langchain-ai.github.io/langgraph/llms.txt`
+- LangGraph Full: `https://langchain-ai.github.io/langgraph/llms-full.txt`
+- LangChain: `https://python.langchain.com/llms.txt`
+
+**When to use:**
+- ✅ No internet connection
+- ✅ Want deterministic answers from known docs
+- ✅ Privacy-sensitive environments
+
+**Limitations:**
+- ⚠️ Only knows information in downloaded docs
+- ⚠️ Docs may become outdated
+
+### Online Mode
+
+**How it works:**
+1. Searches web using Tavily API (optional) or falls back to Gemini's knowledge
+2. Combines web results with query
+3. Gemini synthesizes comprehensive answer
+4. Returns answer with latest information
+
+**External services used:**
+- **Tavily Search API** (optional): Free tier, sign up at https://app.tavily.com/home
+  - If no API key: Falls back to Gemini's built-in knowledge
+- **Google Gemini**: Required, free tier available
+
+**When to use:**
+- ✅ Need latest information
+- ✅ Query about recent features/updates
+- ✅ Want comprehensive answers with web context
+
+---
+
+## 🔄 Data Freshness Strategy
+
+### Offline Data Updates
+
+**Manual update:**
+```powershell
+python .\scripts\download_docs.py
 ```
 
-## Data Freshness Strategy
+This fetches the latest documentation from official sources.
 
-This project supports both static (offline) and dynamic (online) data sources.
+**Update frequency recommendation:**
+- Monthly for active development
+- Quarterly for stable usage
 
-Offline Data
-- The `.txt` files inside `data/` may become outdated. Users can refresh
-  the offline knowledge base manually by re-downloading the latest `.txt`
-  documents from the official sources (these are the same URLs used by
-  `scripts/download_docs.py`):
+### Online Data
 
-  - LangGraph Docs:
-    - `https://langchain-ai.github.io/langgraph/llms.txt`
-    - `https://langchain-ai.github.io/langgraph/llms-full.txt`
+Online mode always fetches fresh data - no manual updates needed.
 
-  - LangChain Python Docs:
-    - `https://python.langchain.com/llms.txt`
+---
 
-- Run `python .\scripts\download_docs.py` to automatically refresh the
-  `data/` directory with the latest `.txt` files. This is the canonical
-  data preparation and refresh workflow for offline mode.
+## 🧪 Testing
 
-Online Data
-- Online mode uses live DuckDuckGo search results for every query. Because
-  no caching is performed, online mode always fetches fresh data and does
-  not require manual offline refreshes.
+### Run Tests
+```powershell
+# Install pytest
+pip install pytest
 
-This dual approach satisfies the assignment requirement of supporting both
-local static data and remote dynamic data.
+# Run all tests
+pytest tests/ -v
 
-## Assignment mapping: AI Technical Assignment - LangGraph Helper Agent
+# Run with coverage
+pytest tests/ --cov=agent
+```
 
-This repository is organized to satisfy the assignment requirements. Summary:
+### Test Coverage
 
-- Dual Operating Modes: Supported via `--mode` CLI flag or `AGENT_MODE` env var.
-  - Offline Mode: works without web access, uses local `data/*.txt` (see
-    `scripts/download_docs.py` for data preparation).
-  - Online Mode: uses DuckDuckGo Instant Answer API (free) + Gemini (LLM).
-- Language Model: Gemini is used via `google.generativeai`.
-  - Obtain a Gemini API key from Google AI Studio: `https://studio.research.google.com/`.
-- Technical Stack: Python; minimal, portable implementation. Dependencies in
-  `requirements.txt`.
-- Documentation Sources: The repository uses the provided `llms.txt` sources
-  and `scripts/download_docs.py` automates retrieval. Additional sources may
-  be added and must be documented in the README and refresh workflow.
-- Portability: Clear setup, dependency management, and environment guidance
-  are included in this README.
+Tests verify:
+- ✅ Offline docs loading functionality
+- ✅ OfflineRetriever search accuracy
+- ✅ Top-k result limiting
+- ✅ Empty query handling
+- ✅ Edge cases
 
-## Example questions the agent should handle
+---
+
+## 🎓 Example Questions
+
+The agent can answer questions like:
 
 - "How do I add persistence to a LangGraph agent?"
 - "What's the difference between StateGraph and MessageGraph?"
 - "Show me how to implement human-in-the-loop with LangGraph"
 - "How do I handle errors and retries in LangGraph nodes?"
 - "What are best practices for state management in LangGraph?"
+- "How do I use checkpointers in LangGraph?"
+- "What's new in the latest version of LangGraph?"
 
-These are example prompts the agent aims to support using the offline docs
-and online search + Gemini pipeline.
+---
 
-## Extending the project
+## 🛠️ Extending the Project
 
-- Add new CLI features by providing a single function in `agent/` and
-  re-exporting it from `agent/__init__.py` so `main.py` can call it.
-- To swap LLM providers, modify `agent/utils.py` but keep a single function
-  `call_gemini(prompt: str) -> str` (or rename consistently) so the
-  `answer_online` wrapper stays thin.
-- To improve offline retrieval at scale, persist the TF-IDF/vectorizer
-  state or switch to an embeddings-based index. The `OfflineRetriever` is
-  the implementation to build on.
+### Add New Agent Features
 
-## Security & privacy
+1. Create function in `agent/` module
+2. Export from `agent/__init__.py`
+3. Call from `main.py`
 
-- Do not commit `.env` with real keys. Use `.env` locally and keep secrets
-  out of source control.
-- The `scripts/download_docs.py` fetches remote content; review sources if
-  you need to control provenance of the offline docs.
+### Swap LLM Provider
 
-## Contributing
+Modify `agent/utils.py` to use different provider while keeping the same interface:
+```python
+def call_gemini(prompt: str) -> str:
+    # Your custom LLM implementation here
+    pass
+```
 
-1. Open an issue describing desired change or bug.
-2. Implement a focused change and push a PR. Keep modules small and tests
-   scoped to the change.
+### Improve Retrieval
 
-## License
+The `OfflineRetriever` class can be extended:
+- Add semantic embeddings (e.g., sentence-transformers)
+- Implement caching for faster searches
+- Add re-ranking algorithms
 
-This repository does not include a license file. Add a `LICENSE` to clarify
-terms for contributors and users.
+---
 
+## 📋 Requirements
+
+- **Python**: >= 3.10
+- **Dependencies**: Listed in `requirements.txt` with versions
+- **API Keys**: 
+  - Google Gemini (required): https://aistudio.google.com/app/apikey
+  - Tavily (optional): https://app.tavily.com/home
+
+---
+
+## 🔐 Security & Privacy
+
+- ⚠️ **Never commit `.env`** - contains your API keys
+- ✅ `.env` is in `.gitignore` to prevent accidental commits
+- ✅ Use `.env.example` as template (no real keys)
+- ⚠️ Review `scripts/download_docs.py` sources before running
+
+---
+
+## 🤝 Contributing
+
+1. Open an issue describing the change or bug
+2. Implement focused changes
+3. Add tests for new functionality
+4. Submit a pull request
+
+---
+
+## 📄 License
+
+This repository does not currently include a license file. Consider adding an MIT or Apache 2.0 license for open contribution.
+
+---
+
+## 🎯 Assignment Compliance
+
+This project fulfills all requirements of the AI Technical Assignment:
+
+| Requirement | Status | Implementation |
+|------------|--------|----------------|
+| Dual Operating Modes | ✅ | `--mode` flag or `AGENT_MODE` env var |
+| Offline Mode | ✅ | Uses local `data/*.txt` files |
+| Online Mode | ✅ | Tavily API + Gemini |
+| Google Gemini LLM | ✅ | Free tier via `google.generativeai` |
+| Python Implementation | ✅ | Pure Python 3.10+ |
+| Documentation Sources | ✅ | llms.txt format from official sources |
+| Portability | ✅ | Clear setup, deps, env config |
+| Mode Switching | ✅ | CLI flag and environment variable |
+| Free Tier Services | ✅ | All services have free tiers |
+| Data Freshness | ✅ | Manual offline updates, auto online |
+
+---
+
+## 📞 Support
+
+For questions or issues:
+1. Check existing GitHub issues
+2. Review this README thoroughly
+3. Open a new issue with detailed description
+
+---
+
+**Built with ❤️ for the LangGraph community**
